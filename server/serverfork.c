@@ -6,7 +6,15 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#include <fcntl.h>
+#include <time.h>
+#include <errno.h>
+
+#include <stdbool.h>
+
 void talkwithclient(int sock);
+
+bool g_nonblock = 1;
 
 int main(int argc, char **argv)
 {
@@ -24,6 +32,21 @@ int main(int argc, char **argv)
     {
         fprintf(stderr, "ERROR opening socket\n");
         exit(1);
+    }
+
+    if (g_nonblock)
+    {
+        int flags = fcntl(sockfd, F_GETFL, 0);
+
+        if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) != -1)
+        {
+            fprintf(stderr, "Listening socket got O_NONBLOCK flag\n");
+        }
+        else
+        {
+            fprintf(stderr, "ERROR Listening socket failed to got O_NONBLOCK flag\n");
+            exit(1);
+        }
     }
 
     bzero((char *) &srv_addr, sizeof(srv_addr));
@@ -45,10 +68,31 @@ int main(int argc, char **argv)
         pid_t pid;
 
         newsockfd = accept(sockfd, (struct sockaddr *) &cli_addr, &cli_addr_len);
-        if (newsockfd < 0) 
+
+        if (newsockfd >= 0)
         {
-            fprintf(stderr, "ERROR on binding\n");
-            exit(1);
+            fprintf(stderr, "Connection accepted, newsockfd %d\n", newsockfd);
+        }
+        else
+        {
+            int err = errno;
+
+            if (g_nonblock && (err == EAGAIN || err == EWOULDBLOCK))
+            {
+                struct timespec ts;
+
+                fprintf(stderr, "Wait a little and invoke accept again\n");
+
+                ts.tv_sec = 2;
+                ts.tv_nsec = 0;
+                nanosleep(&ts, &ts);
+                continue;
+            }
+            else
+            {
+                fprintf(stderr, "ERROR on accept, newsockfd %d, errno %d\n", newsockfd, err);
+                exit(1);
+            }
         }
 
         pid = fork();
@@ -82,8 +126,8 @@ void talkwithclient(int sock)
 
     if (n < 0)
     {
-        fprintf(stderr, "ERROR reading from socket");
-        exit(1);
+        int err = errno;
+        fprintf(stderr, "ERROR reading from socket, errno %d\n", err);
     }
 
     printf("Message: %s\n", buffer);
@@ -92,7 +136,7 @@ void talkwithclient(int sock)
 
     if (n < 0)
     {
-        fprintf(stderr, "ERROR writing to socket");
-        exit(1);
+        int err = errno;
+        fprintf(stderr, "ERROR writing to socket, errno %d\n", err);
     }
 }

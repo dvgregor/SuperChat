@@ -1,2 +1,2 @@
 serverfork: serverfork.c
-	gcc serverfork.c -o serverfork
+	gcc -std=c11 serverfork.c -o serverfork
